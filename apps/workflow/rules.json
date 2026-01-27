@@ -1,0 +1,84 @@
+{
+  "assessment": {
+    "create": {
+      "from": [],
+      "to": "In Progress",
+      "roles": ["Admin", "Requester"]
+    },
+
+    "submit": {
+      "from": ["In Progress"],
+      "to": "Submitted",
+      "roles": ["Vendor"],
+      "conditions": ["mandatory_answers_completed"]
+    },
+
+    "send_for_review": {
+      "from": ["Submitted"],
+      "to": "Under Review",
+      "roles": ["Admin", "Reviewer"]
+    },
+
+    "approve": {
+      "from": ["Under Review"],
+      "to": "Approved",
+      "roles": ["Reviewer"],
+      "conditions": ["no_open_remediation"]
+    },
+
+    "reject": {
+      "from": ["Under Review"],
+      "to": "In Progress",
+      "roles": ["Reviewer"]
+    }
+  },
+
+  "remediation": {
+    "create": {
+      "from": [],
+      "to": "Open",
+      "roles": ["Reviewer"]
+    },
+
+    "start": {
+      "from": ["Open"],
+      "to": "In Progress",
+      "roles": ["Vendor"]
+    },
+
+    "submit": {
+      "from": ["In Progress"],
+      "to": "Submitted",
+      "roles": ["Vendor"],
+      "conditions": ["evidence_uploaded"]
+    },
+
+    "close": {
+      "from": ["Submitted"],
+      "to": "Closed",
+      "roles": ["Reviewer"],
+      "conditions": ["evidence_uploaded"]
+    }
+  },
+
+  "renewal": {
+    "schedule": {
+      "from": [],
+      "to": "Scheduled",
+      "roles": ["Admin"]
+    },
+
+    "trigger": {
+      "from": ["Scheduled"],
+      "to": "Due",
+      "roles": ["System"],
+      "conditions": ["time_based"]
+    },
+
+    "complete": {
+      "from": ["Due"],
+      "to": "Completed",
+      "roles": ["Admin"]
+    }
+  }
+}
