@@ -33,5 +33,6 @@ urlpatterns = [
     path("api/", include(router.urls)),
     path("api/", include("apps.accounts.urls")),
     
+    
 ]
 

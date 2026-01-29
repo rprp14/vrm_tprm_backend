@@ -5,7 +5,17 @@
       "to": "In Progress",
       "roles": ["Admin", "Requester"]
     },
-
+    "assessment": {
+    "draft": {
+      "next": ["submitted"],
+      "role": "vendor"
+    },
+    "submitted": {
+      "next": ["approved", "rejected"],
+      "role": "reviewer",
+      "conditions": ["no_open_remediation"]
+    }
+  },
     "submit": {
       "from": ["In Progress"],
       "to": "Submitted",

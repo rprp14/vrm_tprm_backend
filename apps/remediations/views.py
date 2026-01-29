@@ -1,115 +1,123 @@
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import PermissionDenied
+from rest_framework import status
+from rest_framework.response import Response
 
 from .models import Remediation
 from .serializers import RemediationSerializer
+
 from apps.workflow.engine import validate_transition
-from apps.audit.utils import log_event
+from apps.workflow.exceptions import WorkflowForbidden, WorkflowConflict
+from apps.audit.services import log_audit_event
 
 
 # -------------------------
-# RENEWAL (Admin only)
-# -------------------------
-class RenewalViewSet(ModelViewSet):
-    permission_classes = [IsAuthenticated]
-
-    def perform_create(self, serializer):
-        if self.request.user.role != "Admin":
-            raise PermissionDenied("Only admins can schedule renewals")
-
-        serializer.save()
-
-
-# -------------------------
-# REMEDIATION
+# REMEDIATION WORKFLOW
 # -------------------------
 class RemediationViewSet(ModelViewSet):
-    queryset = Remediation.objects.all()
     serializer_class = RemediationSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        # 🔒 Tenant isolation
+        return Remediation.objects.filter(
+            assessment__org_id=self.request.user.org_id
+        )
+
     # -------------------------
-    # CREATE → Reviewer only
+    # CREATE REMEDIATION
+    # Reviewer only
     # -------------------------
     def perform_create(self, serializer):
         if self.request.user.role != "Reviewer":
             raise PermissionDenied("Only reviewers can create remediations")
 
-        serializer.save()
+        remediation = serializer.save()
+
+        log_audit_event(
+            user_id=self.request.user.id,
+            action="REMEDIATION_CREATED",
+            entity="remediation",
+            entity_id=remediation.id,
+            from_status=None,
+            to_status=remediation.status,
+            org_id=remediation.assessment.org_id
+        )
 
     # -------------------------
-    # UPDATE → Workflow controlled
+    # UPDATE REMEDIATION
+    # Workflow controlled
     # -------------------------
-    def perform_update(self, serializer):
+    def update(self, request, *args, **kwargs):
         remediation = self.get_object()
-        user = self.request.user
-        new_status = self.request.data.get("status")
-
-        # 🔒 Vendor can modify ONLY their own remediation
-        if user.role == "Vendor":
-            if remediation.assessment.vendor.user != user:
-                raise PermissionDenied("You cannot modify this remediation")
+        user = request.user
+        from_status = remediation.status
+        to_status = request.data.get("status")
 
         # 🔒 Admin is read-only
         if user.role == "Admin":
             raise PermissionDenied("Admin cannot modify remediation")
 
+        # 🔒 Vendor can act only on own org
+        if user.role == "Vendor":
+            if remediation.assessment.org_id != user.org_id:
+                raise PermissionDenied("Cross-tenant access blocked")
+
         # -------------------------
-        # STATUS CHANGE
+        # STATUS TRANSITION
         # -------------------------
-        if new_status and new_status != remediation.status:
+        if to_status and to_status != from_status:
 
-            # 🔁 Map transition → action
-            if remediation.status == "Open" and new_status == "In Progress":
-                action = "start"
+            # Map transition → workflow action
+            transition_map = {
+                ("open", "in_progress"): "start",
+                ("in_progress", "submitted"): "submit",
+                ("submitted", "closed"): "close",
+                ("submitted", "reopened"): "reopen",
+            }
 
-                if user.role != "Vendor":
-                    raise PermissionDenied("Only vendor can start remediation")
-
-            elif remediation.status == "In Progress" and new_status == "Submitted":
-                action = "submit"
-
-                if user.role != "Vendor":
-                    raise PermissionDenied("Only vendor can submit remediation")
-
-            elif remediation.status == "Submitted" and new_status == "Closed":
-                action = "close"
-
-                if user.role != "Reviewer":
-                    raise PermissionDenied("Only reviewer can close remediation")
-
-            else:
-                raise ValidationError(
-                    "Invalid remediation status transition",
-                    code=409
-                )
+            action = transition_map.get((from_status, to_status))
+            if not action:
+                raise WorkflowConflict("Invalid remediation status transition")
 
             try:
-                # 🔑 Central workflow validation
-                validate_transition(remediation, action, user.role)
-
-                serializer.save()
-
-                log_event(
-                    user=user,
+                validate_transition(
+                    entity="remediation",
                     action=action,
-                    entity="Remediation",
-                    entity_id=remediation.id,
-                    success=True
+                    current_status=from_status,
+                    role=user.role,
+                    context={
+                        "evidence_uploaded": remediation.evidence.exists(),
+                        "org_id": remediation.assessment.org_id,
+                        "user_org": user.org_id
+                    }
                 )
+            except WorkflowForbidden as e:
+                return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+            except WorkflowConflict as e:
+                return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
 
-            except Exception as e:
-                log_event(
-                    user=user,
-                    action=action,
-                    entity="Remediation",
-                    entity_id=remediation.id,
-                    success=False,
-                    error_message=str(e)
-                )
-                raise
+            remediation.status = to_status
+            remediation.save(update_fields=["status"])
 
-        else:
-            # Non-status update (e.g., evidence upload)
-            serializer.save()
+            log_audit_event(
+                user_id=user.id,
+                action=f"REMEDIATION_{action.upper()}",
+                entity="remediation",
+                entity_id=remediation.id,
+                from_status=from_status,
+                to_status=to_status,
+                org_id=remediation.assessment.org_id
+            )
+
+            return Response(
+                {"message": f"Remediation {to_status}"},
+                status=status.HTTP_200_OK
+            )
+
+        # -------------------------
+        # NON-STATUS UPDATE
+        # (e.g. evidence upload)
+        # -------------------------
+        return super().update(request, *args, **kwargs)
