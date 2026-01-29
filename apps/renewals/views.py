@@ -10,7 +10,7 @@ class RenewalViewSet(ModelViewSet):
     queryset = Renewal.objects.all()
     serializer_class = RenewalSerializer
     permission_classes = [IsAuthenticated]
-
+    
     def perform_update(self, serializer):
         renewal = self.get_object()
         new_status = self.request.data.get("status")

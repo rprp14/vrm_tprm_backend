@@ -31,5 +31,7 @@ router.register("renewals", RenewalViewSet, basename="renewal")
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include(router.urls)),
+    path("api/", include("apps.accounts.urls")),
+    
 ]
 

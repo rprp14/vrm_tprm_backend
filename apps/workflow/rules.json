@@ -20,11 +20,12 @@
     },
 
     "approve": {
-      "from": ["Under Review"],
-      "to": "Approved",
-      "roles": ["Reviewer"],
-      "conditions": ["no_open_remediation"]
-    },
+    "from": ["Under Review"],
+    "to": "Approved",
+    "roles": ["Reviewer"],
+    "conditions": ["no_open_remediation"],
+    "audit_event": "ASSESSMENT_APPROVED"
+  },
 
     "reject": {
       "from": ["Under Review"],
